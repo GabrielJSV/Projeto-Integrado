@@ -2,7 +2,7 @@ import time
 from collections import deque
 import numpy as np
 import serial
-from scipy.signal import butter, filtfilt, find_peaks
+from scipy.signal import butter, filtfilt, find_peaks, resample_poly
 import matplotlib.pyplot as plt
 from matplotlib.gridspec import GridSpec
 
@@ -343,6 +343,78 @@ class LeitorPADS:
             'fs': self.fs
         }
 
+
+class LeitorTremorDedo:
+    """
+    Le CSV de sensor no DEDO (ex.: dataset PosturalTremor).
+
+    Formato bem diferente do CSV do Arduino:
+    - separador ';' e cabecalho "Time;X;Y;Z";
+    - tempo em "HH:MM:SS.ffffff";
+    - X,Y,Z em 'g' (com gravidade), tipicamente a ~2500 Hz.
+
+    Aqui: converte g -> m/s^2 e REAMOSTRA para ~fs_alvo (100 Hz por padrao),
+    para ficar igual ao Arduino/PADS e deixar a FFT legivel (2500 Hz daria um
+    eixo de frequencia ate 1250 Hz, escondendo o tremor). A reamostragem usa
+    filtro anti-aliasing, entao nao perde o tremor (< 50 Hz).
+    """
+
+    def __init__(self, caminho, fs_alvo=100.0):
+        self.caminho = caminho
+        self.fs_alvo = fs_alvo
+
+    @staticmethod
+    def _parse_tempo(s):
+        # "HH:MM:SS.ffffff" -> segundos
+        h, m, resto = s.split(':')
+        return int(h) * 3600 + int(m) * 60 + float(resto)
+
+    def carregar(self):
+        ts, xs, ys, zs = [], [], [], []
+        with open(self.caminho) as f:
+            f.readline()  # pula o cabecalho "Time;X;Y;Z"
+            for linha in f:
+                p = linha.strip().split(';')
+                if len(p) < 4:
+                    continue
+                try:
+                    ts.append(self._parse_tempo(p[0]))
+                    xs.append(float(p[1]))
+                    ys.append(float(p[2]))
+                    zs.append(float(p[3]))
+                except ValueError:
+                    continue
+
+        ts = np.array(ts)
+        acex = np.array(xs) * 9.80665   # g -> m/s^2
+        acey = np.array(ys) * 9.80665
+        acez = np.array(zs) * 9.80665
+
+        # fs original (mediana dos intervalos positivos)
+        dt = np.diff(ts)
+        dt = dt[dt > 0]
+        fs_orig = 1.0 / np.median(dt) if len(dt) else self.fs_alvo
+
+        # Reamostra para ~fs_alvo (decimacao com anti-aliasing)
+        fator = max(1, int(round(fs_orig / self.fs_alvo)))
+        if fator > 1:
+            acex = resample_poly(acex, 1, fator)
+            acey = resample_poly(acey, 1, fator)
+            acez = resample_poly(acez, 1, fator)
+            fs = fs_orig / fator
+        else:
+            fs = fs_orig
+
+        dados = np.sqrt(acex ** 2 + acey ** 2 + acez ** 2)  # magnitude
+        tempo = np.arange(len(dados)) / fs
+        return {
+            'dados': dados,
+            'acex': acex,
+            'acey': acey,
+            'acez': acez,
+            'tempo': tempo,
+            'fs': fs,
+        }
 
 
 class MetricasParkinson:

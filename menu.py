@@ -14,7 +14,8 @@ import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
 
 from analisador import (ProcessadorSinal, PainelGraficos, AquisicaoSerial,
-                        BufferDados, LeitorCSV, LeitorPADS, MetricasParkinson)
+                        BufferDados, LeitorCSV, LeitorPADS, LeitorTremorDedo,
+                        MetricasParkinson)
 
 
 # ====================== CONFIGURACAO ======================
@@ -41,7 +42,7 @@ TAREFAS_PADS = [
 
 # ====================== INTERFACE: RELATORIO ======================
 def mostrar_relatorio_gui(rel, subtitulo=""):
-    """Mostra o relatorio numa janela (tabela parametro -> valor)."""
+    """Mostra o relatorio numa janela (tabela parametro -> valdadaor)."""
     win = tk.Tk()
     win.title("Relatorio de Analise")
     win.geometry("560x440")
@@ -164,8 +165,17 @@ def analisar_arquivo():
             d[k] = d[k] * ProcessadorSinal.G
         subt = f"PADS  |  {TAREFAS_PADS[r['tarefa']]}  |  punho {r['pulso']}"
     else:
-        d = LeitorCSV(caminho).carregar()
-        subt = os.path.basename(caminho)
+        # CSV: detecta o formato pela 1a linha
+        #   sensor de dedo -> "Time;X;Y;Z" (separador ';')
+        #   Arduino        -> "x,y,z,t"    (separador ',')
+        with open(caminho, 'r') as fcheck:
+            primeira = fcheck.readline()
+        if ';' in primeira:
+            d = LeitorTremorDedo(caminho).carregar()
+            subt = f"Sensor de dedo  |  {os.path.basename(caminho)}"
+        else:
+            d = LeitorCSV(caminho).carregar()
+            subt = os.path.basename(caminho)
 
     root.destroy()
     rel = _processar_e_plotar(d, subt)
