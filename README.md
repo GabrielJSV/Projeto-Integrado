@@ -2,10 +2,11 @@
 
 Ferramenta para analisar sinais de **aceleração** e extrair indicadores de
 **tremor** e **bradicinesia** associados à doença de Parkinson. Funciona com
-duas fontes de dados:
+três fontes de dados:
 
 - **Arduino + MPU6050** — aquisição em tempo real (e gravação em CSV);
-- **Dataset PADS** (*Parkinson's Disease Smartwatch*) — arquivos binários `.bin`.
+- **Dataset PADS** (*Parkinson's Disease Smartwatch*) — arquivos binários `.bin`;
+- **Sensor no dedo** (ex.: dataset *PosturalTremor*) — CSV em outro formato.
 
 O sinal é filtrado, projetado no eixo de maior movimento (PCA), transformado
 para o domínio da frequência (FFT) e resumido num relatório de métricas.
@@ -26,6 +27,8 @@ pip install numpy scipy matplotlib pyserial
 ```
 
 Para o Arduino: bibliotecas **Adafruit MPU6050** e **Adafruit Unified Sensor**.
+Se a Adafruit não funcionar, há uma versão alternativa do firmware usando a
+biblioteca **MPU6050** da Electronic Cats (ver `sketch_mpu6050_lib`).
 
 ---
 
@@ -35,7 +38,9 @@ Para o Arduino: bibliotecas **Adafruit MPU6050** e **Adafruit Unified Sensor**.
 |---|---|
 | `menu.py` | **Programa principal** — menu com Tempo Real e Analisar Arquivo |
 | `analisador.py` | Todas as classes (processamento, gráficos, leitura, métricas) |
-| `sketch_apr23a/sketch_apr23a.ino` | Firmware do Arduino (lê o MPU6050 e envia pela serial) |
+| `sketch_apr23a/sketch_apr23a.ino` | Firmware do Arduino (biblioteca **Adafruit**) |
+| `sketch_mpu6050_lib/sketch_mpu6050_lib.ino` | Firmware alternativo (biblioteca **MPU6050.h** / Electronic Cats) |
+| `preprocessed/` | Arquivos `.bin` do dataset PADS |
 
 ### Classes em `analisador.py`
 
@@ -47,6 +52,8 @@ Para o Arduino: bibliotecas **Adafruit MPU6050** e **Adafruit Unified Sensor**.
 - **`BufferDados`** — buffer circular usado no tempo real (janela da FFT).
 - **`LeitorCSV`** — lê CSV do Arduino (detecta 4 ou 5 colunas).
 - **`LeitorPADS`** — lê o `.bin` do PADS (devolve em `g`).
+- **`LeitorTremorDedo`** — lê CSV de sensor no dedo (separador `;`, reamostra
+  para 100 Hz).
 - **`MetricasParkinson`** — calcula e imprime o relatório de métricas.
 
 ---
@@ -64,6 +71,16 @@ ace_x, ace_y, ace_z, t
 - (Arquivos antigos com 5 colunas — `ace, x, y, z, t` — ainda são lidos.)
 - O `t` gravado é o `millis()` do Arduino. Na leitura, o tempo é **reconstruído**
   a partir do índice e do `fs`, então sempre começa em 0 (veja "limitações").
+
+### CSV do sensor de dedo (ex.: PosturalTremor)
+Formato diferente, **detectado automaticamente** pelo separador:
+
+- separador **`;`** e cabeçalho `Time;X;Y;Z`;
+- tempo em `HH:MM:SS.ffffff`;
+- `X,Y,Z` em **`g`** (com gravidade), tipicamente a **~2500 Hz**.
+- O leitor converte **g → m/s²** e **reamostra para 100 Hz** (com anti-aliasing),
+  pra ficar igual ao Arduino/PADS e deixar a FFT legível (a 2500 Hz o eixo iria
+  até 1250 Hz e o tremor sumiria). Nada se perde — tremor é < 50 Hz.
 
 ### Binário do PADS (`.bin`)
 Matriz `float32` de forma **(132, 976)**:
@@ -103,14 +120,18 @@ python menu.py
 Abre um **menu** com duas opções:
 
 ### Tempo Real (Arduino)
-1. Carregue `sketch_apr23a/sketch_apr23a.ino` na placa.
+1. Carregue `sketch_apr23a/sketch_apr23a.ino` na placa (ou o
+   `sketch_mpu6050_lib` se usar a biblioteca MPU6050.h).
 2. No topo do `menu.py`, ajuste `PORTA` (ex.: `COM10`) e `BAUD` (115200).
 3. Clique em **Tempo Real** — mostra os gráficos ao vivo e grava um CSV
-   `dados_<data>.csv`. Ao fechar a janela, o **relatório** aparece numa interface.
+   `dados_<data>.csv`. Ao fechar a janela, o **relatório** aparece numa interface
+   (calculado sobre **todo** o registro gravado).
 
 ### Analisar Arquivo (CSV / PADS)
-Clique em **Analisar Arquivo** e escolha o arquivo no seletor:
-- **CSV** (Arduino) → análise direta;
+Clique em **Analisar Arquivo** e escolha o arquivo — o formato é **detectado
+automaticamente**:
+- **CSV do Arduino** (vírgula) → análise direta;
+- **CSV do sensor de dedo** (ponto-e-vírgula) → converte, reamostra e analisa;
 - **`.bin`** (PADS) → um diálogo pede a **tarefa (0–10)** e o **punho (L/R)**.
 
 Ao fechar os gráficos, o **relatório** aparece numa janela.
@@ -155,6 +176,7 @@ em 3 grupos:
 | `BANDA_TREMOR` | `menu.py` | (3.5, 7.5) Hz | Faixa considerada como tremor. |
 | `TAMANHO_JANELA` | `menu.py` | 256 | Nº de pontos por FFT no tempo real. |
 | `fs` do PADS | `LeitorPADS` | 100 Hz | Frequência de amostragem assumida do PADS. |
+| `fs_alvo` (sensor dedo) | `LeitorTremorDedo` | 100 Hz | Alvo da reamostragem do sensor de dedo. |
 
 **Unidades:** todo o pipeline trabalha em **m/s²** e **segundos**.
 
@@ -201,7 +223,8 @@ comece alto ou resete no meio da gravação.
 > FREQUENCIA_MAX = 30        # precisa ser < fs/2
 > BANDA_TREMOR  = (3.5, 7.5) # precisa caber abaixo de fs/2
 > ```
-> Ex.: a 50 Hz, fs/2 = 25 Hz, então `FREQUENCIA_MAX = 30` **quebra** — use ~20.
+> Ex.: a 60 Hz, fs/2 = 30 Hz, então `FREQUENCIA_MAX = 30` **quebra** — use ~20.
+> A 80 Hz (fs/2 = 40) o padrão 30 ainda funciona.
 
 ### 3. Se também mudar o baud rate (ex.: para Bluetooth)
 Taxa de amostragem e baud são coisas diferentes, mas se trocar o baud no
@@ -229,3 +252,6 @@ Arduino, troque junto no Python — os dois têm que bater:
 - O `millis()` do Arduino pode começar alto ou **resetar** no meio da gravação.
   O tempo é reconstruído do índice ÷ fs (sempre começa em 0), mas se houve um
   reset, fica ~1 amostra "estranha" no ponto do salto.
+- Em registros com gravidade (Arduino, sensor de dedo), pode aparecer um pico de
+  **baixa frequência** (~0 Hz) na FFT — é a deriva lenta da gravidade ao mudar a
+  postura, não o tremor. As métricas começam em 0,5 Hz, então quase não a contam.
