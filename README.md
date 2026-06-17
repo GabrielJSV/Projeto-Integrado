@@ -40,7 +40,6 @@ biblioteca **MPU6050** da Electronic Cats (ver `sketch_mpu6050_lib`).
 | `analisador.py` | Todas as classes (processamento, gráficos, leitura, métricas) |
 | `sketch_apr23a/sketch_apr23a.ino` | Firmware do Arduino (biblioteca **Adafruit**) |
 | `sketch_mpu6050_lib/sketch_mpu6050_lib.ino` | Firmware alternativo (biblioteca **MPU6050.h** / Electronic Cats) |
-| `preprocessed/` | Arquivos `.bin` do dataset PADS |
 
 ### Classes em `analisador.py`
 
